@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from .database import engine, Base
 from .qdrant_store import init_qdrant, close_qdrant
 from .hq_adapter import hq_register, hq_event
-from .routers import knowledge, request
+from .routers import knowledge, request, memory_backup, bots, librarian
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -33,6 +33,9 @@ app = FastAPI(title="WYRD Library", version="0.1.0", lifespan=lifespan)
 
 app.include_router(knowledge.router)
 app.include_router(request.router)
+app.include_router(memory_backup.router)
+app.include_router(bots.router)
+app.include_router(librarian.router)
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

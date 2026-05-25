@@ -6,11 +6,12 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
 from .database import engine, Base
 from .qdrant_store import init_qdrant, close_qdrant
 from .hq_adapter import hq_register, hq_event
-from .routers import knowledge, request, memory_backup, bots, librarian
+from .routers import knowledge, request, memory_backup, bots, librarian, thomas
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -22,20 +23,25 @@ STATIC_DIR = Path(__file__).parent / "static"
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Migration: add namespace column if not exists
+        await conn.execute(text(
+            "ALTER TABLE knowledge ADD COLUMN IF NOT EXISTS namespace VARCHAR(50) DEFAULT 'public'"
+        ))
     await init_qdrant()
     await hq_register()
-    await hq_event("startup", {"service": "library", "version": "0.1.0"})
+    await hq_event("startup", {"service": "library", "version": "0.2.0"})
     yield
     await close_qdrant()
 
 
-app = FastAPI(title="WYRD Library", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="WYRD Library", version="0.2.0", lifespan=lifespan)
 
 app.include_router(knowledge.router)
 app.include_router(request.router)
 app.include_router(memory_backup.router)
 app.include_router(bots.router)
 app.include_router(librarian.router)
+app.include_router(thomas.router)
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -46,7 +52,7 @@ def root():
     p = STATIC_DIR / "library.html"
     if p.exists():
         return FileResponse(str(p))
-    return {"message": "WYRD Library v0.1.0"}
+    return {"message": "WYRD Library v0.2.0"}
 
 
 @app.get("/health")
@@ -55,7 +61,7 @@ def health():
     return {
         "status": "ok",
         "service": "wyrd-library",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "uptime_seconds": uptime,
         "timestamp": datetime.utcnow().isoformat(),
     }

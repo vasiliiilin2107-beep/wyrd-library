@@ -39,6 +39,7 @@ class Knowledge(Base):
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(String(500), default="direct")
     category: Mapped[str] = mapped_column(String(50), default="world")
+    namespace: Mapped[str] = mapped_column(String(50), default="public")
     ttl_type: Mapped[str] = mapped_column(String(20), default="fresh")
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
     request_count: Mapped[int] = mapped_column(Integer, default=0)

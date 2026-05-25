@@ -20,13 +20,14 @@ SIMILARITY_THRESHOLD = 0.90
 class RequestIn(BaseModel):
     question: str
     category: str = "world"
+    namespace: str = "public"
     ttl_type: str = "fresh"
 
 
 @router.post("")
 async def handle_request(body: RequestIn, session: AsyncSession = Depends(get_session)):
     # 1. Semantic search — if close enough, return from cache
-    hits = await search_knowledge(body.question, body.category, limit=1)
+    hits = await search_knowledge(body.question, body.category, limit=1, namespace=body.namespace)
     if hits and hits[0]["score"] >= SIMILARITY_THRESHOLD:
         kid = hits[0].get("knowledge_id")
         if kid:
@@ -56,6 +57,7 @@ async def handle_request(body: RequestIn, session: AsyncSession = Depends(get_se
         answer=raw,
         source="courier:duckduckgo",
         category=body.category,
+        namespace=body.namespace,
         ttl_type=body.ttl_type,
         expires_at=expires,
         request_count=1,
@@ -63,7 +65,7 @@ async def handle_request(body: RequestIn, session: AsyncSession = Depends(get_se
     session.add(rec)
     await session.flush()
 
-    qdrant_id = await store_knowledge(rec.id, body.question, raw, body.category)
+    qdrant_id = await store_knowledge(rec.id, body.question, raw, body.category, namespace=body.namespace)
     if qdrant_id:
         rec.qdrant_id = qdrant_id
     await session.commit()

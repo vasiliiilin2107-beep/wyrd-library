@@ -5,7 +5,7 @@ from typing import Optional
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, or_
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_session
@@ -24,7 +24,7 @@ SYSTEM = """Ты Библиотекарь WYRD — самый начитанны
 Отвечай по-русски, чётко и по делу. Ссылайся на источники если знаешь их."""
 
 
-async def _ask_claude(question: str, context: str) -> str:
+async def _ask_claude(question: str, context: str, system: Optional[str] = None) -> str:
     if not KIE_API_KEY:
         return "Библиотекарь не настроен: нет KIE_API_KEY."
     prompt = f"Знания из Библиотеки:\n{context}\n\nВопрос: {question}"
@@ -36,7 +36,7 @@ async def _ask_claude(question: str, context: str) -> str:
                 json={
                     "model": MODEL,
                     "max_tokens": 1500,
-                    "system": SYSTEM,
+                    "system": system or SYSTEM,
                     "messages": [{"role": "user", "content": prompt}],
                 },
             )
@@ -50,6 +50,7 @@ async def _ask_claude(question: str, context: str) -> str:
 class AskIn(BaseModel):
     question: str
     category: Optional[str] = None
+    namespace: Optional[str] = None
     top_k: int = 5
 
 
@@ -58,8 +59,7 @@ async def ask_librarian(body: AskIn, session: AsyncSession = Depends(get_session
     if not body.question.strip():
         raise HTTPException(400, "question is empty")
 
-    # Семантический поиск по базе
-    hits = await search_knowledge(body.question, body.category, limit=body.top_k)
+    hits = await search_knowledge(body.question, body.category, limit=body.top_k, namespace=body.namespace)
 
     if not hits:
         return {
@@ -68,7 +68,6 @@ async def ask_librarian(body: AskIn, session: AsyncSession = Depends(get_session
             "from_cache": False,
         }
 
-    # Загружаем полные ответы из PostgreSQL
     ids = [h.get("knowledge_id") for h in hits if h.get("knowledge_id")]
     rows: list[Knowledge] = []
     if ids:
@@ -76,7 +75,6 @@ async def ask_librarian(body: AskIn, session: AsyncSession = Depends(get_session
         rows = result.scalars().all()
     rows_map = {r.id: r for r in rows}
 
-    # Строим контекст для Библиотекаря
     context_parts = []
     sources = []
     for i, hit in enumerate(hits, 1):

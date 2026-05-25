@@ -53,7 +53,13 @@ async def close_qdrant() -> None:
         _client = None
 
 
-async def store_knowledge(knowledge_id: int, question: str, answer: str, category: str) -> Optional[int]:
+async def store_knowledge(
+    knowledge_id: int,
+    question: str,
+    answer: str,
+    category: str,
+    namespace: str = "public",
+) -> Optional[int]:
     if _client is None or _embedder is None:
         return None
     try:
@@ -68,7 +74,12 @@ async def store_knowledge(knowledge_id: int, question: str, answer: str, categor
             points=[PointStruct(
                 id=knowledge_id,
                 vector=vector,
-                payload={"knowledge_id": knowledge_id, "category": category, "question": question},
+                payload={
+                    "knowledge_id": knowledge_id,
+                    "category": category,
+                    "question": question,
+                    "namespace": namespace,
+                },
             )],
         )
         return knowledge_id
@@ -77,7 +88,12 @@ async def store_knowledge(knowledge_id: int, question: str, answer: str, categor
         return None
 
 
-async def search_knowledge(query: str, category: Optional[str] = None, limit: int = 5) -> list[dict]:
+async def search_knowledge(
+    query: str,
+    category: Optional[str] = None,
+    limit: int = 5,
+    namespace: Optional[str] = None,
+) -> list[dict]:
     if _client is None or _embedder is None:
         return []
     try:
@@ -86,11 +102,13 @@ async def search_knowledge(query: str, category: Optional[str] = None, limit: in
         loop = asyncio.get_running_loop()
         vector = await loop.run_in_executor(None, _embed_sync, query, _embedder)
 
-        query_filter = None
+        must = []
         if category:
-            query_filter = Filter(
-                must=[FieldCondition(key="category", match=MatchValue(value=category))]
-            )
+            must.append(FieldCondition(key="category", match=MatchValue(value=category)))
+        if namespace:
+            must.append(FieldCondition(key="namespace", match=MatchValue(value=namespace)))
+
+        query_filter = Filter(must=must) if must else None
 
         response = await _client.query_points(
             collection_name=COLLECTION,

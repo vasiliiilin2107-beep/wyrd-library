@@ -18,8 +18,9 @@ TTL_DAYS = {"static": None, "fresh": 30, "realtime": 1}
 class KnowledgeIn(BaseModel):
     question: str
     answer: str
-    source: str = "direct"
+    source: str  # обязателен — без метки источника не пишем
     category: str = "world"
+    namespace: str = "public"
     ttl_type: str = "fresh"
 
 
@@ -29,24 +30,27 @@ class RateIn(BaseModel):
 
 @router.post("", status_code=201)
 async def create_knowledge(body: KnowledgeIn, session: AsyncSession = Depends(get_session)):
+    if not body.source.strip():
+        raise HTTPException(400, "source is required")
     days = TTL_DAYS.get(body.ttl_type)
     expires = datetime.utcnow() + timedelta(days=days) if days else None
     rec = Knowledge(
         question=body.question, answer=body.answer, source=body.source,
-        category=body.category, ttl_type=body.ttl_type, expires_at=expires,
+        category=body.category, namespace=body.namespace,
+        ttl_type=body.ttl_type, expires_at=expires,
     )
     session.add(rec)
     await session.flush()
-    qdrant_id = await store_knowledge(rec.id, body.question, body.answer, body.category)
+    qdrant_id = await store_knowledge(rec.id, body.question, body.answer, body.category, namespace=body.namespace)
     if qdrant_id:
         rec.qdrant_id = qdrant_id
     await session.commit()
-    return {"id": rec.id, "category": rec.category, "ttl_type": rec.ttl_type}
+    return {"id": rec.id, "category": rec.category, "namespace": rec.namespace, "ttl_type": rec.ttl_type}
 
 
 @router.get("/search")
-async def search(q: str, category: Optional[str] = None, limit: int = 5):
-    results = await search_knowledge(q, category, limit=limit)
+async def search(q: str, category: Optional[str] = None, namespace: Optional[str] = None, limit: int = 5):
+    results = await search_knowledge(q, category, limit=limit, namespace=namespace)
     return {"results": results, "count": len(results)}
 
 
@@ -67,18 +71,22 @@ async def stats(session: AsyncSession = Depends(get_session)):
 @router.get("")
 async def list_knowledge(
     category: Optional[str] = None,
+    namespace: Optional[str] = None,
     limit: int = 20,
     session: AsyncSession = Depends(get_session),
 ):
     stmt = select(Knowledge).order_by(desc(Knowledge.request_count)).limit(limit)
     if category:
         stmt = stmt.where(Knowledge.category == category)
+    if namespace:
+        stmt = stmt.where(Knowledge.namespace == namespace)
     rows = (await session.execute(stmt)).scalars().all()
     return {"items": [
         {
             "id": r.id,
             "question": r.question[:120],
             "category": r.category,
+            "namespace": r.namespace,
             "source": r.source,
             "request_count": r.request_count,
             "rating": r.rating,

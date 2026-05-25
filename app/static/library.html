@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WYRD — Библиотека</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Space+Grotesk:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#020209;color:#e2e8f0;font-family:'Space Grotesk',sans-serif;min-height:100vh;padding:24px}
+a{color:#10b981;text-decoration:none}
+h1{font-family:'Orbitron',monospace;font-size:1.6rem;font-weight:700;color:#10b981;letter-spacing:.15em;margin-bottom:4px}
+.sub{color:rgba(255,255,255,.35);font-size:.8rem;letter-spacing:.1em;margin-bottom:32px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px}
+@media(max-width:700px){.grid{grid-template-columns:1fr}}
+.card{background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.18);border-radius:12px;padding:20px}
+.card h2{font-size:.7rem;letter-spacing:.12em;color:rgba(255,255,255,.4);margin-bottom:12px;text-transform:uppercase}
+.stat-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.stat-row:last-child{border:none}
+.stat-val{font-family:'Orbitron',monospace;font-size:1.1rem;color:#10b981}
+.cat-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:.7rem;font-weight:500;background:rgba(16,185,129,.15);color:#10b981;border:1px solid rgba(16,185,129,.3)}
+.cat-badge.analytics{background:rgba(249,115,22,.1);color:#f97316;border-color:rgba(249,115,22,.3)}
+.cat-badge.finance{background:rgba(239,68,68,.1);color:#ef4444;border-color:rgba(239,68,68,.3)}
+.cat-badge.tech{background:rgba(59,130,246,.1);color:#3b82f6;border-color:rgba(59,130,246,.3)}
+.cat-badge.content{background:rgba(139,92,246,.1);color:#8b5cf6;border-color:rgba(139,92,246,.3)}
+.search-bar{display:flex;gap:10px;margin-bottom:20px}
+.search-bar input,input,select,textarea{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;padding:10px 14px;font-family:'Space Grotesk',sans-serif;font-size:.9rem;outline:none;transition:border-color .2s}
+.search-bar input{flex:1}
+input:focus,select:focus,textarea:focus{border-color:rgba(16,185,129,.5)}
+select option{background:#0d1117}
+.btn{padding:10px 20px;border-radius:8px;border:none;cursor:pointer;font-family:'Space Grotesk',sans-serif;font-size:.85rem;font-weight:500;transition:all .2s}
+.btn-green{background:rgba(16,185,129,.2);color:#10b981;border:1px solid rgba(16,185,129,.4)}
+.btn-green:hover{background:rgba(16,185,129,.35)}
+.btn-sm{padding:5px 12px;font-size:.75rem}
+.results{display:flex;flex-direction:column;gap:10px;margin-bottom:28px}
+.result-item{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 16px}
+.result-q{font-size:.85rem;color:rgba(255,255,255,.6);margin-bottom:6px}
+.result-a{font-size:.9rem;line-height:1.6}
+.result-meta{display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.score{font-size:.72rem;color:rgba(255,255,255,.35)}
+.hits-badge{font-size:.72rem;color:rgba(255,255,255,.35)}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-grid textarea{grid-column:1/-1;min-height:80px;resize:vertical}
+.form-grid input,
+.form-grid select,
+.form-grid textarea{width:100%}
+.section-title{font-family:'Orbitron',monospace;font-size:.75rem;letter-spacing:.12em;color:rgba(255,255,255,.4);margin-bottom:14px;text-transform:uppercase}
+.empty{color:rgba(255,255,255,.25);font-size:.85rem;padding:16px 0}
+.rate-btns{display:flex;gap:6px}
+.rate-btn{background:none;border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.4);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:.75rem}
+.rate-btn:hover{border-color:rgba(16,185,129,.5);color:#10b981}
+</style>
+</head>
+<body>
+<h1>📚 БИБЛИОТЕКА</h1>
+<p class="sub">WYRD KNOWLEDGE BASE — ПАМЯТЬ МИРА</p>
+
+<div class="grid">
+  <div class="card">
+    <h2>Статистика</h2>
+    <div id="stats-content"><div class="empty">Загрузка...</div></div>
+  </div>
+  <div class="card">
+    <h2>Запрос через конвейер</h2>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input id="req-q" placeholder="Задай вопрос — курьер найдёт ответ" />
+      <div style="display:flex;gap:10px">
+        <select id="req-cat" style="flex:1">
+          <option value="world">world</option>
+          <option value="content">content</option>
+          <option value="analytics">analytics</option>
+          <option value="finance">finance</option>
+          <option value="tech">tech</option>
+        </select>
+        <select id="req-ttl" style="flex:1">
+          <option value="fresh">fresh (30d)</option>
+          <option value="static">static (∞)</option>
+          <option value="realtime">realtime (1d)</option>
+        </select>
+      </div>
+      <button class="btn btn-green" onclick="sendRequest()">Отправить запрос</button>
+      <div id="req-result" style="font-size:.82rem;color:rgba(255,255,255,.5);min-height:20px"></div>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h2>Поиск по базе</h2>
+  <div class="search-bar">
+    <input id="search-q" placeholder="Семантический поиск..." onkeydown="if(event.key==='Enter')doSearch()" />
+    <select id="search-cat">
+      <option value="">все категории</option>
+      <option value="world">world</option>
+      <option value="content">content</option>
+      <option value="analytics">analytics</option>
+      <option value="finance">finance</option>
+      <option value="tech">tech</option>
+    </select>
+    <button class="btn btn-green" onclick="doSearch()">Найти</button>
+  </div>
+  <div id="search-results"></div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <div class="section-title">Добавить знание вручную (аналитики)</div>
+  <div class="form-grid">
+    <input id="add-q" placeholder="Вопрос / тема" />
+    <input id="add-src" placeholder="Источник (URL или название)" />
+    <select id="add-cat">
+      <option value="world">world</option>
+      <option value="content">content</option>
+      <option value="analytics">analytics</option>
+      <option value="finance">finance</option>
+      <option value="tech">tech</option>
+    </select>
+    <select id="add-ttl">
+      <option value="fresh">fresh (30d)</option>
+      <option value="static">static (∞)</option>
+      <option value="realtime">realtime (1d)</option>
+    </select>
+    <textarea id="add-a" placeholder="Ответ / знание (очищенное)"></textarea>
+  </div>
+  <button class="btn btn-green" style="margin-top:12px" onclick="addKnowledge()">Добавить в библиотеку</button>
+  <div id="add-result" style="font-size:.82rem;color:rgba(255,255,255,.5);margin-top:8px"></div>
+</div>
+
+<div class="card">
+  <div class="section-title">Последние записи (топ по запросам)</div>
+  <div id="recent-list"><div class="empty">Загрузка...</div></div>
+</div>
+
+<script>
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const CAT_COLORS = {content:'content',analytics:'analytics',finance:'finance',tech:'tech',world:''};
+
+function catBadge(c){ return `<span class="cat-badge ${CAT_COLORS[c]||''}">${esc(c)}</span>`; }
+
+async function loadStats() {
+  try {
+    const r = await fetch('/knowledge/stats');
+    const d = await r.json();
+    let html = `<div class="stat-row"><span>Всего записей</span><span class="stat-val">${d.total}</span></div>`;
+    for (const row of d.by_category) {
+      html += `<div class="stat-row"><span>${catBadge(row.category)}</span><span class="stat-val">${row.count}</span></div>`;
+    }
+    document.getElementById('stats-content').innerHTML = html || '<div class="empty">Пусто</div>';
+  } catch(e) { document.getElementById('stats-content').innerHTML = '<div class="empty">Ошибка загрузки</div>'; }
+}
+
+async function loadRecent() {
+  try {
+    const r = await fetch('/knowledge?limit=10');
+    const d = await r.json();
+    if (!d.items.length) { document.getElementById('recent-list').innerHTML = '<div class="empty">Пусто</div>'; return; }
+    document.getElementById('recent-list').innerHTML = d.items.map(it => `
+      <div class="result-item">
+        <div class="result-q">${esc(it.question)}</div>
+        <div class="result-meta">
+          ${catBadge(it.category)}
+          <span class="hits-badge">🔁 ${it.request_count} запросов</span>
+          <span class="score">⭐ ${it.rating}</span>
+          <span class="score">${esc(it.ttl_type)}</span>
+          <div class="rate-btns">
+            <button class="rate-btn" onclick="rate(${it.id},1)">+</button>
+            <button class="rate-btn" onclick="rate(${it.id},-1)">−</button>
+          </div>
+        </div>
+      </div>`).join('');
+  } catch(e) { document.getElementById('recent-list').innerHTML = '<div class="empty">Ошибка</div>'; }
+}
+
+async function doSearch() {
+  const q = document.getElementById('search-q').value.trim();
+  if (!q) return;
+  const cat = document.getElementById('search-cat').value;
+  const url = `/knowledge/search?q=${encodeURIComponent(q)}&limit=5` + (cat ? `&category=${cat}` : '');
+  try {
+    const r = await fetch(url);
+    const d = await r.json();
+    if (!d.results.length) { document.getElementById('search-results').innerHTML = '<div class="empty">Ничего не найдено</div>'; return; }
+    document.getElementById('search-results').innerHTML = '<div class="results">' + d.results.map(it => `
+      <div class="result-item">
+        <div class="result-q">${esc(it.question||'—')}</div>
+        <div class="result-meta">${catBadge(it.category||'world')}<span class="score">сходство: ${it.score}</span></div>
+      </div>`).join('') + '</div>';
+  } catch(e) { document.getElementById('search-results').innerHTML = '<div class="empty">Ошибка поиска</div>'; }
+}
+
+async function sendRequest() {
+  const q = document.getElementById('req-q').value.trim();
+  if (!q) return;
+  const el = document.getElementById('req-result');
+  el.textContent = '⏳ Отправляю курьера...';
+  try {
+    const r = await fetch('/request', {method:'POST',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({question:q, category:document.getElementById('req-cat').value, ttl_type:document.getElementById('req-ttl').value})});
+    const d = await r.json();
+    if (d.source === 'cache') el.textContent = `✅ Из кэша (сходство ${d.score}): ${d.answer?.slice(0,200)||'—'}`;
+    else if (d.source === 'courier') { el.textContent = `📦 Курьер вернул: ${d.answer?.slice(0,200)||'—'}`; loadStats(); loadRecent(); }
+    else el.textContent = '⚠️ Курьер не нашёл ответа';
+  } catch(e) { el.textContent = 'Ошибка: ' + e.message; }
+}
+
+async function addKnowledge() {
+  const q = document.getElementById('add-q').value.trim();
+  const a = document.getElementById('add-a').value.trim();
+  if (!q || !a) { document.getElementById('add-result').textContent = 'Заполни вопрос и ответ'; return; }
+  try {
+    const r = await fetch('/knowledge', {method:'POST',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({question:q, answer:a, source:document.getElementById('add-src').value||'direct',
+        category:document.getElementById('add-cat').value, ttl_type:document.getElementById('add-ttl').value})});
+    const d = await r.json();
+    document.getElementById('add-result').textContent = `✅ Добавлено: id=${d.id}`;
+    document.getElementById('add-q').value=''; document.getElementById('add-a').value=''; document.getElementById('add-src').value='';
+    loadStats(); loadRecent();
+  } catch(e) { document.getElementById('add-result').textContent = 'Ошибка: ' + e.message; }
+}
+
+async function rate(id, val) {
+  await fetch(`/knowledge/${id}/rate`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({rating:val})});
+  loadRecent();
+}
+
+loadStats();
+loadRecent();
+</script>
+</body>
+</html>

@@ -4,10 +4,12 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware import Middleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
+from .auth import internal_token_middleware
 from .database import engine, Base
 from .qdrant_store import init_qdrant, close_qdrant
 from .hq_adapter import hq_register, hq_event
@@ -35,6 +37,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="WYRD Library", version="0.2.0", lifespan=lifespan)
+app.middleware("http")(internal_token_middleware)
 
 app.include_router(knowledge.router)
 app.include_router(request.router)

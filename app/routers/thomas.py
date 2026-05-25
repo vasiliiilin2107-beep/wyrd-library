@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
@@ -25,6 +26,49 @@ THOMAS_SYSTEM = """Ты Библиотекарь WYRD — отвечаешь Т�
 
 TTL_DAYS = {"static": None, "fresh": 30, "realtime": 1}
 
+# --- Карантин памяти ---
+_MIN_Q = 10    # минимум символов в question
+_MIN_A = 5     # минимум символов в answer
+_MAX_FIELD = 2000  # максимум символов в одном поле
+
+_INJECTION_RE = re.compile(
+    r"ignore\s+(previous|all|above|prior)\s+instructions?"
+    r"|you\s+are\s+now\b"
+    r"|pretend\s+(you\s+are|to\s+be)"
+    r"|act\s+as\s+(a\s+|an\s+)?\w+"
+    r"|forget\s+(everything|all|your)"
+    r"|new\s+(role|persona|instructions?|context)"
+    r"|system\s+prompt"
+    r"|<\s*(system|instruction|prompt)\s*>"
+    r"|roleplay"
+    r"|jailbreak"
+    r"|\[INST\]"
+    r"|<\|[\w\s]+\|>"          # <|im_start|> и подобные
+    r"|\{\{.{0,60}\}\}"        # {{template injection}}
+    r"|игнорируй\s+инструкции"
+    r"|ты\s+теперь\s+\w+"
+    r"|притворись\s+(что\s+)?ты",
+    re.IGNORECASE,
+)
+
+
+def _quarantine(question: str, answer: str) -> None:
+    """Блокирует инъекции и мусор. Бросает HTTPException при нарушении."""
+    q, a = question.strip(), answer.strip()
+    if len(q) < _MIN_Q:
+        raise HTTPException(400, f"question слишком короткий (минимум {_MIN_Q} символов)")
+    if len(a) < _MIN_A:
+        raise HTTPException(400, f"answer пустой или слишком короткий (минимум {_MIN_A} символов)")
+    if len(q) > _MAX_FIELD:
+        raise HTTPException(400, f"question превышает лимит {_MAX_FIELD} символов")
+    if len(a) > _MAX_FIELD:
+        raise HTTPException(400, f"answer превышает лимит {_MAX_FIELD} символов")
+    for field_name, val in (("question", q), ("answer", a)):
+        m = _INJECTION_RE.search(val)
+        if m:
+            log.warning("[Thomas quarantine] инъекция в %s: %r", field_name, m.group())
+            raise HTTPException(422, f"Заблокировано: подозрительный паттерн в {field_name}")
+
 
 def _require_token(x_bot_token: str = Header(...)):
     if not THOMAS_TOKEN:
@@ -50,6 +94,8 @@ async def thomas_remember(body: RememberIn, session: AsyncSession = Depends(get_
     """Записать факт в личное пространство Томаса. Требует X-Bot-Token."""
     if not body.source.strip():
         raise HTTPException(400, "source is required")
+
+    _quarantine(body.question, body.answer)
 
     days = TTL_DAYS.get(body.ttl_type)
     expires = datetime.utcnow() + timedelta(days=days) if days else None

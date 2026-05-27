@@ -13,7 +13,7 @@ from .auth import internal_token_middleware
 from .database import engine, Base
 from .qdrant_store import init_qdrant, close_qdrant
 from .hq_adapter import hq_register, hq_event
-from .routers import knowledge, request, memory_backup, bots, librarian, thomas
+from .routers import knowledge, request, memory_backup, bots, librarian, thomas, readers
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -23,15 +23,16 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Migration: add namespace column if not exists
         await conn.execute(text(
             "ALTER TABLE knowledge ADD COLUMN IF NOT EXISTS namespace VARCHAR(50) DEFAULT 'public'"
         ))
     await init_qdrant()
     await hq_register()
-    await hq_event("startup", {"service": "library", "version": "0.2.0"})
+    await hq_event("startup", {"service": "library", "version": "0.3.0"})
+    asyncio.create_task(readers.reader_scheduler_loop())
     yield
     await close_qdrant()
 
@@ -45,6 +46,7 @@ app.include_router(memory_backup.router)
 app.include_router(bots.router)
 app.include_router(librarian.router)
 app.include_router(thomas.router)
+app.include_router(readers.router)
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

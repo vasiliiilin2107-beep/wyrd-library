@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Integer, String, Text, DateTime, func
+from sqlalchemy import Integer, String, Text, DateTime, Boolean, func
 from sqlalchemy.orm import Mapped, mapped_column
 from .database import Base
 
@@ -29,6 +29,21 @@ class BotProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=func.now(), onupdate=func.now()
     )
+
+
+class Reader(Base):
+    """Агент-читатель: приходит по расписанию, сдаёт темы в /request → Хугин → Карантин → Библиотека."""
+    __tablename__ = "readers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    topics: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON array
+    category: Mapped[str] = mapped_column(String(50), default="world")
+    interval_hours: Mapped[int] = mapped_column(Integer, default=24)
+    last_run: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    runs: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now())
 
 
 class Knowledge(Base):

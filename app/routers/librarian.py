@@ -16,8 +16,8 @@ router = APIRouter(prefix="/librarian", tags=["librarian"])
 log = logging.getLogger(__name__)
 
 KIE_API_KEY = os.environ.get("KIE_API_KEY", "")
-KIE_API_URL = os.environ.get("KIE_API_URL", "https://api.kie.ai")
-MODEL = os.environ.get("KIE_CHAT_MODEL", "claude-sonnet-4-6")
+KIE_API_URL = os.environ.get("KIE_API_URL", "https://polza.ai/api/v1")
+MODEL = os.environ.get("KIE_CHAT_MODEL", "deepseek/deepseek-v4-flash")
 
 SYSTEM = """Ты Библиотекарь WYRD — самый начитанный бот в системе НЕЙРОЦЕХ.
 Ты отвечаешь ТОЛЬКО из знаний своей Библиотеки. Не выдумываешь. Если в базе нет ответа — говоришь честно.
@@ -31,17 +31,19 @@ async def _ask_claude(question: str, context: str, system: Optional[str] = None)
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             r = await client.post(
-                f"{KIE_API_URL}/claude/v1/messages",
+                f"{KIE_API_URL}/chat/completions",
                 headers={"Authorization": f"Bearer {KIE_API_KEY}", "Content-Type": "application/json"},
                 json={
                     "model": MODEL,
                     "max_tokens": 1500,
-                    "system": system or SYSTEM,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": [
+                        {"role": "system", "content": system or SYSTEM},
+                        {"role": "user", "content": prompt},
+                    ],
                 },
             )
             r.raise_for_status()
-            return r.json()["content"][0]["text"]
+            return r.json()["choices"][0]["message"]["content"]
     except Exception as e:
         log.warning(f"[Librarian] Claude call failed: {e}")
         raise HTTPException(503, f"Библиотекарь временно недоступен: {e}")

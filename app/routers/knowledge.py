@@ -68,6 +68,23 @@ async def stats(session: AsyncSession = Depends(get_session)):
     }
 
 
+@router.get("/{kid}")
+async def get_knowledge_item(kid: int, session: AsyncSession = Depends(get_session)):
+    rec = await session.get(Knowledge, kid)
+    if not rec:
+        raise HTTPException(404, "not found")
+    return {
+        "id": rec.id,
+        "question": rec.question,
+        "answer": rec.answer,
+        "source": rec.source,
+        "category": rec.category,
+        "namespace": rec.namespace,
+        "ttl_type": rec.ttl_type,
+        "expires_at": rec.expires_at.isoformat() if rec.expires_at else None,
+    }
+
+
 @router.get("")
 async def list_knowledge(
     category: Optional[str] = None,

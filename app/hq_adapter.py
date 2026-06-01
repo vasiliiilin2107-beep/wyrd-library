@@ -32,3 +32,28 @@ async def hq_event(event_type: str, payload: dict = None) -> None:
             })
     except Exception as e:
         log.warning(f"[HQ] event failed (non-fatal): {e}")
+
+
+async def hq_register_agent(name: str, role: str, level: str, branch: str) -> int | None:
+    """Регистрирует агента в HQ. Возвращает agent_id или None."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.post(f"{HQ_URL}/civilization/agents", json={
+                "name": name, "role": role, "level": level, "branch": branch, "can_propose": False,
+            })
+            return r.json().get("id")
+    except Exception as e:
+        log.warning(f"[HQ] register_agent failed: {e}")
+        return None
+
+
+async def hq_pulse_agent(agent_id: int, status: str, current_task: str | None = None, metrics: dict | None = None) -> None:
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(f"{HQ_URL}/civilization/agents/{agent_id}/pulse", json={
+                "status": status,
+                "current_task": current_task,
+                "metrics": metrics,
+            })
+    except Exception as e:
+        log.warning(f"[HQ] pulse failed: {e}")

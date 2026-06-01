@@ -61,7 +61,7 @@ class ReaderIn(BaseModel):
     name: str
     topics: list[str]
     category: str = "world"
-    interval_hours: int = 24
+    interval_hours: int = 2
     reader_type: str = "stable"  # stable | oneshot
 
 

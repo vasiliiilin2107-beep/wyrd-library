@@ -88,6 +88,22 @@ async def store_knowledge(
         return None
 
 
+async def delete_knowledge(ids: list[int]) -> int:
+    """Удаляет точки из Qdrant по knowledge_id. Возвращает кол-во удалённых."""
+    if _client is None or not ids:
+        return 0
+    try:
+        from qdrant_client.models import PointIdsList
+        await _client.delete(
+            collection_name=COLLECTION,
+            points_selector=PointIdsList(points=ids),
+        )
+        return len(ids)
+    except Exception as e:
+        log.warning(f"[Qdrant] delete error: {e}")
+        return 0
+
+
 async def search_knowledge(
     query: str,
     category: Optional[str] = None,

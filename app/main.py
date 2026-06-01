@@ -38,6 +38,9 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE knowledge ADD COLUMN IF NOT EXISTS synthesized BOOLEAN DEFAULT FALSE"
         ))
+        await conn.execute(text(
+            "UPDATE readers SET interval_hours = 4 WHERE reader_type = 'stable' AND interval_hours >= 12"
+        ))
     await init_qdrant()
     await hq_register()
     await hq_event("startup", {"service": "library", "version": "0.3.0"})

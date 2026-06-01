@@ -159,6 +159,26 @@ async def writer_loop():
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
+@router.get("/briefs")
+async def get_briefs(session: AsyncSession = Depends(get_session)):
+    """Последние синтезы по категориям с полным текстом — фоновый контекст для Совета."""
+    rows = (await session.execute(
+        select(Knowledge)
+        .where(Knowledge.namespace == "synthesis")
+        .order_by(Knowledge.created_at.desc())
+        .limit(8)
+    )).scalars().all()
+    return {"items": [
+        {
+            "id": r.id,
+            "category": r.category,
+            "synthesis": r.answer[:600],
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in rows
+    ]}
+
+
 @router.post("/run")
 async def run_now():
     """Ручной запуск синтеза."""

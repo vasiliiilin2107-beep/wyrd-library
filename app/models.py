@@ -51,6 +51,20 @@ class Reader(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now())
 
 
+class ArchivistCheck(Base):
+    """Лог всех проверок Архивариуса: что спрашивали, нашли или отправили в поиск."""
+    __tablename__ = "archivist_checks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    topic: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(String(50), default="world")
+    namespace: Mapped[str] = mapped_column(String(50), default="public")
+    status: Mapped[str] = mapped_column(String(20), default="searching")  # found | searching | blocked
+    score: Mapped[float | None] = mapped_column(nullable=True)
+    reader_assigned: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now())
+
+
 class Knowledge(Base):
     __tablename__ = "knowledge"
 

@@ -13,7 +13,7 @@ from .auth import internal_token_middleware
 from .database import engine, Base
 from .qdrant_store import init_qdrant, close_qdrant
 from .hq_adapter import hq_register, hq_event
-from .routers import knowledge, request, memory_backup, bots, librarian, thomas, readers
+from .routers import knowledge, request, memory_backup, bots, librarian, thomas, readers, archivist
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -53,6 +53,7 @@ app.include_router(bots.router)
 app.include_router(librarian.router)
 app.include_router(thomas.router)
 app.include_router(readers.router)
+app.include_router(archivist.router)
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

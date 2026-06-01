@@ -79,6 +79,7 @@ class Knowledge(Base):
     request_count: Mapped[int] = mapped_column(Integer, default=0)
     rating: Mapped[int] = mapped_column(Integer, default=0)
     qdrant_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    synthesized: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=func.now(), onupdate=func.now()

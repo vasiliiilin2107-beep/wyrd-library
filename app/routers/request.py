@@ -1,16 +1,15 @@
 import os
 import logging
-from urllib.parse import quote
-from datetime import datetime
+from datetime import datetime, timedelta
 
-import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_session
 from ..models import Knowledge
-from ..qdrant_store import search_knowledge
+from ..qdrant_store import search_knowledge, store_knowledge
+from ..courier import search as courier_search
 
 router = APIRouter(prefix="/request", tags=["request"])
 log = logging.getLogger(__name__)
@@ -60,38 +59,31 @@ async def handle_request(body: RequestIn, session: AsyncSession = Depends(get_se
     if body.cache_only:
         return {"source": "not_found", "answer": None}
 
-    # 3. Заряжаем Хугина — всё внешнее только через Scout → Карантин → Библиотека
-    log.info("[Request] cache miss → Huginn: %.80s", body.question)
-    search_url = f"https://html.duckduckgo.com/html/?q={quote(body.question)}"
+    # 3. Cache miss → Perplexity Sonar (реальный поиск в интернете)
+    log.info("[Request] cache miss → Perplexity: %.80s", body.question)
 
-    try:
-        async with httpx.AsyncClient(timeout=45) as client:
-            resp = await client.post(
-                f"{WYRD_QUARANTINE_URL}/huginn/scout",
-                json={"url": search_url, "task": body.question, "category": body.category},
-                headers=_huginn_headers(),
-            )
-    except Exception as e:
-        log.warning("[Request] Huginn unreachable: %s", e)
-        return {"source": "error", "answer": None, "note": f"Huginn unreachable: {e}"}
+    result = await courier_search(body.question)
+    if not result["answer"] or len(result["answer"]) < 20:
+        return {"source": "not_found", "answer": None}
 
-    if resp.status_code == 403:
-        log.error("[Request] Huginn 403 — add library token to quarantine WYRD_ALLOWED_TOKENS")
-        return {"source": "error", "answer": None, "note": "auth error"}
+    source = result["sources"][0] if result["sources"] else "perplexity/sonar"
+    days = {"static": None, "fresh": 30, "realtime": 1}.get(body.ttl_type)
+    rec = Knowledge(
+        question=body.question,
+        answer=result["answer"],
+        source=source,
+        category=body.category,
+        namespace=body.namespace,
+        ttl_type=body.ttl_type,
+        expires_at=datetime.utcnow() + timedelta(days=days) if days else None,
+    )
+    session.add(rec)
+    await session.commit()
+    await session.refresh(rec)
 
-    if resp.status_code != 200:
-        log.warning("[Request] Huginn HTTP %s", resp.status_code)
-        return {"source": "error", "answer": None, "note": f"Huginn HTTP {resp.status_code}"}
+    qdrant_id = await store_knowledge(rec.id, body.question, result["answer"], body.category, namespace=body.namespace)
+    if qdrant_id:
+        rec.qdrant_id = qdrant_id
+        await session.commit()
 
-    data = resp.json()
-    status = data.get("status")
-    result = data.get("result")
-
-    if status in ("library_hit", "clean") and result:
-        return {"source": "huginn", "answer": result, "library_written": data.get("library_written", False)}
-
-    if status in ("threat", "quarantine_offline", "blocked", "fetch_error"):
-        log.warning("[Request] Huginn blocked content: status=%s threats=%s", status, data.get("threats"))
-        return {"source": "blocked", "answer": None, "status": status}
-
-    return {"source": "not_found", "answer": None}
+    return {"source": "perplexity", "answer": result["answer"], "library_written": True, "knowledge_id": rec.id}

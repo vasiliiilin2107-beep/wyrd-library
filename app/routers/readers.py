@@ -11,7 +11,6 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta
-from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,7 +19,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_session, engine
-from ..models import Reader
+from ..models import Reader, Knowledge
+from ..qdrant_store import store_knowledge
+from ..courier import search as courier_search
 
 router = APIRouter(prefix="/readers", tags=["readers"])
 log = logging.getLogger(__name__)
@@ -177,42 +178,47 @@ async def _run_reader(reader: Reader, session: AsyncSession) -> dict:
 
 
 async def _run_stable(reader: Reader, session: AsyncSession) -> dict:
-    """Стабильный читатель: LLM генерирует новый угол каждый прогон."""
+    """Стабильный читатель: LLM генерирует новый угол → Perplexity ищет → сохраняем."""
     topics = json.loads(reader.topics)
     last_queries = json.loads(reader.last_queries or "[]")
     report = {}
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=30) as client:
         for topic in topics:
             query = await _generate_fresh_query(topic, reader.category, last_queries, client)
             log.info("[Readers] %s | тема='%s' | запрос='%s'", reader.name, topic[:40], query[:60])
 
-            search_url = f"https://html.duckduckgo.com/html/?q={quote(query)}"
-            try:
-                resp = await client.post(
-                    f"{WYRD_QUARANTINE_URL}/huginn/scout",
-                    json={"url": search_url, "task": query, "category": reader.category},
-                    headers=_huginn_headers(),
-                    timeout=45,
+            result = await courier_search(query)
+            if result["answer"] and len(result["answer"]) > 30:
+                source = result["sources"][0] if result["sources"] else "perplexity/sonar"
+                rec = Knowledge(
+                    question=query,
+                    answer=result["answer"],
+                    source=source,
+                    category=reader.category,
+                    namespace="public",
+                    ttl_type="fresh",
+                    expires_at=datetime.utcnow() + timedelta(days=30),
                 )
-                data = resp.json() if resp.status_code == 200 else {}
-                status = data.get("status", f"http_{resp.status_code}")
-                report[topic[:40]] = {"query": query[:60], "status": status}
+                session.add(rec)
+                await session.flush()
+                qdrant_id = await store_knowledge(rec.id, query, result["answer"], reader.category)
+                if qdrant_id:
+                    rec.qdrant_id = qdrant_id
+                report[topic[:40]] = {"query": query[:60], "status": "saved", "chars": len(result["answer"])}
+            else:
+                report[topic[:40]] = {"query": query[:60], "status": "empty"}
 
-                # Запоминаем запрос чтобы не повторять
-                last_queries.append(query)
-                if len(last_queries) > MAX_LAST_QUERIES:
-                    last_queries = last_queries[-MAX_LAST_QUERIES:]
-
-            except Exception as e:
-                report[topic[:40]] = {"query": query[:60], "status": f"error: {e}"}
+            last_queries.append(query)
+            if len(last_queries) > MAX_LAST_QUERIES:
+                last_queries = last_queries[-MAX_LAST_QUERIES:]
 
     reader.last_queries = json.dumps(last_queries, ensure_ascii=False)
     return report
 
 
 async def _run_oneshot(reader: Reader, session: AsyncSession) -> dict:
-    """Одноразовый читатель: берёт первую тему из очереди, удаляет после прогона."""
+    """Одноразовый читатель: берёт первую тему → Perplexity ищет → сохраняем → удаляем тему."""
     topics = json.loads(reader.topics)
     if not topics:
         reader.enabled = False
@@ -222,29 +228,34 @@ async def _run_oneshot(reader: Reader, session: AsyncSession) -> dict:
     topic = topics[0]
     log.info("[Readers] %s (oneshot) | тема='%s'", reader.name, topic[:60])
 
-    search_url = f"https://html.duckduckgo.com/html/?q={quote(topic)}"
-    result = {"query": topic[:60], "status": "error"}
+    result = await courier_search(topic)
+    if result["answer"] and len(result["answer"]) > 30:
+        source = result["sources"][0] if result["sources"] else "perplexity/sonar"
+        rec = Knowledge(
+            question=topic,
+            answer=result["answer"],
+            source=source,
+            category=reader.category,
+            namespace="public",
+            ttl_type="fresh",
+            expires_at=datetime.utcnow() + timedelta(days=30),
+        )
+        session.add(rec)
+        await session.flush()
+        qdrant_id = await store_knowledge(rec.id, topic, result["answer"], reader.category)
+        if qdrant_id:
+            rec.qdrant_id = qdrant_id
+        status = "saved"
+    else:
+        status = "empty"
 
-    async with httpx.AsyncClient(timeout=45) as client:
-        try:
-            resp = await client.post(
-                f"{WYRD_QUARANTINE_URL}/huginn/scout",
-                json={"url": search_url, "task": topic, "category": reader.category},
-                headers=_huginn_headers(),
-            )
-            data = resp.json() if resp.status_code == 200 else {}
-            result["status"] = data.get("status", f"http_{resp.status_code}")
-        except Exception as e:
-            result["status"] = f"error: {e}"
-
-    # Удаляем использованную тему
     topics.pop(0)
     reader.topics = json.dumps(topics, ensure_ascii=False)
     if not topics:
         reader.enabled = False
         log.info("[Readers] %s очередь исчерпана → выключен", reader.name)
 
-    return {topic[:40]: result}
+    return {topic[:40]: {"status": status}}
 
 
 # ── LLM: генерация свежего угла поиска ─────────────────────────────────────

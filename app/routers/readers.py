@@ -1,6 +1,10 @@
 """
-Отдел читателей. Агенты-подписчики с темами и расписанием.
-Каждый читатель по расписанию сдаёт темы в /request → Хугин → Карантин → Библиотека.
+Отдел читателей (Хугины). Агенты-подписчики с темами и расписанием.
+
+reader_type=stable  : тема постоянная, каждый прогон LLM генерирует новый угол.
+reader_type=oneshot : очередь тем, тема удаляется после прогона. Когда пусто → disabled.
+
+Цепочка: Reader → Карантин /huginn/scout → Библиотека
 """
 import asyncio
 import json
@@ -26,6 +30,27 @@ WYRD_QUARANTINE_URL = os.environ.get(
     "http://ktup27quru59l1m4wfes69ow.147.45.212.155.sslip.io",
 )
 WYRD_INTERNAL_TOKEN = os.environ.get("WYRD_INTERNAL_TOKEN", "")
+KIE_API_KEY = os.environ.get("KIE_API_KEY", "")
+KIE_API_URL = os.environ.get("KIE_API_URL", "https://polza.ai/api/v1")
+KIE_MODEL = os.environ.get("KIE_CHAT_MODEL", "deepseek/deepseek-v4-flash")
+
+# Скилл "Умный читатель" — профессиональный исследователь
+SMART_READER_SKILL = """Ты профессиональный исследователь. Твоя задача — сформулировать один точный поисковый запрос.
+
+Правила:
+- Запрос должен раскрывать новый угол темы, которого ещё не было в истории поиска
+- Ищи свежее: события, исследования, практики 2025-2026 года
+- Запрос должен быть конкретным — не "что такое X", а "как X влияет на Y в контексте Z"
+- Формулируй как задаёт вопрос эксперт, а не новичок
+- Только сам запрос в ответе, без объяснений
+
+Примеры хороших запросов по теме "Стратегическое мышление":
+- "cognitive biases strategic planning enterprise 2026"
+- "military decision making under uncertainty lessons business"
+- "second order thinking failures startups real cases"
+"""
+
+MAX_LAST_QUERIES = 20
 
 
 def _huginn_headers() -> dict:
@@ -37,12 +62,14 @@ class ReaderIn(BaseModel):
     topics: list[str]
     category: str = "world"
     interval_hours: int = 24
+    reader_type: str = "stable"  # stable | oneshot
 
 
 class ReaderPatch(BaseModel):
     topics: list[str] | None = None
     interval_hours: int | None = None
     enabled: bool | None = None
+    reader_type: str | None = None
 
 
 # ── CRUD ────────────────────────────────────────────────────────────────────
@@ -51,11 +78,14 @@ class ReaderPatch(BaseModel):
 async def create_reader(body: ReaderIn, session: AsyncSession = Depends(get_session)):
     if not body.topics:
         raise HTTPException(400, "topics cannot be empty")
+    if body.reader_type not in ("stable", "oneshot"):
+        raise HTTPException(400, "reader_type must be stable or oneshot")
     reader = Reader(
         name=body.name,
         topics=json.dumps(body.topics, ensure_ascii=False),
         category=body.category,
         interval_hours=body.interval_hours,
+        reader_type=body.reader_type,
     )
     session.add(reader)
     await session.commit()
@@ -80,6 +110,8 @@ async def patch_reader(rid: int, body: ReaderPatch, session: AsyncSession = Depe
         reader.interval_hours = body.interval_hours
     if body.enabled is not None:
         reader.enabled = body.enabled
+    if body.reader_type is not None:
+        reader.reader_type = body.reader_type
     await session.commit()
     return _fmt(reader)
 
@@ -95,22 +127,20 @@ async def delete_reader(rid: int, session: AsyncSession = Depends(get_session)):
 
 @router.post("/{rid}/run")
 async def run_reader_now(rid: int, session: AsyncSession = Depends(get_session)):
-    """Запустить читателя вручную немедленно."""
     reader = await session.get(Reader, rid)
     if not reader:
         raise HTTPException(404, "Reader not found")
-    results = await _run_reader(reader)
+    results = await _run_reader(reader, session)
     reader.last_run = datetime.utcnow()
     reader.runs += 1
     await session.commit()
-    return {"reader": reader.name, "results": results}
+    return {"reader": reader.name, "type": reader.reader_type, "results": results}
 
 
 # ── Планировщик ─────────────────────────────────────────────────────────────
 
 async def reader_scheduler_loop():
-    """Фоновый цикл: каждые 5 минут проверяет кто из читателей должен работать."""
-    await asyncio.sleep(30)  # дать время сервису подняться
+    await asyncio.sleep(30)
     while True:
         try:
             async with AsyncSession(engine) as session:
@@ -124,35 +154,140 @@ async def reader_scheduler_loop():
                         reader.last_run + timedelta(hours=reader.interval_hours) <= datetime.utcnow()
                     )
                     if due:
-                        log.info("[Readers] %s пора читать (%d тем)", reader.name, len(json.loads(reader.topics)))
-                        results = await _run_reader(reader)
+                        log.info("[Readers] %s (%s) пора читать", reader.name, reader.reader_type)
+                        results = await _run_reader(reader, session)
                         reader.last_run = datetime.utcnow()
                         reader.runs += 1
                         await session.commit()
                         log.info("[Readers] %s готово: %s", reader.name, results)
         except Exception as e:
             log.error("[Readers] scheduler error: %s", e)
-        await asyncio.sleep(300)  # следующая проверка через 5 минут
+        await asyncio.sleep(300)
 
 
-async def _run_reader(reader: Reader) -> dict:
-    """Отправляет темы читателя в Хугин. Возвращает краткий отчёт."""
+# ── Ядро: запуск читателя ───────────────────────────────────────────────────
+
+async def _run_reader(reader: Reader, session: AsyncSession) -> dict:
+    if reader.reader_type == "oneshot":
+        return await _run_oneshot(reader, session)
+    return await _run_stable(reader, session)
+
+
+async def _run_stable(reader: Reader, session: AsyncSession) -> dict:
+    """Стабильный читатель: LLM генерирует новый угол каждый прогон."""
     topics = json.loads(reader.topics)
+    last_queries = json.loads(reader.last_queries or "[]")
     report = {}
-    async with httpx.AsyncClient(timeout=45) as client:
+
+    async with httpx.AsyncClient(timeout=60) as client:
         for topic in topics:
-            search_url = f"https://html.duckduckgo.com/html/?q={quote(topic)}"
+            query = await _generate_fresh_query(topic, reader.category, last_queries, client)
+            log.info("[Readers] %s | тема='%s' | запрос='%s'", reader.name, topic[:40], query[:60])
+
+            search_url = f"https://html.duckduckgo.com/html/?q={quote(query)}"
             try:
                 resp = await client.post(
                     f"{WYRD_QUARANTINE_URL}/huginn/scout",
-                    json={"url": search_url, "task": topic, "category": reader.category},
+                    json={"url": search_url, "task": query, "category": reader.category},
                     headers=_huginn_headers(),
+                    timeout=45,
                 )
                 data = resp.json() if resp.status_code == 200 else {}
-                report[topic[:40]] = data.get("status", f"http_{resp.status_code}")
+                status = data.get("status", f"http_{resp.status_code}")
+                report[topic[:40]] = {"query": query[:60], "status": status}
+
+                # Запоминаем запрос чтобы не повторять
+                last_queries.append(query)
+                if len(last_queries) > MAX_LAST_QUERIES:
+                    last_queries = last_queries[-MAX_LAST_QUERIES:]
+
             except Exception as e:
-                report[topic[:40]] = f"error: {e}"
+                report[topic[:40]] = {"query": query[:60], "status": f"error: {e}"}
+
+    reader.last_queries = json.dumps(last_queries, ensure_ascii=False)
     return report
+
+
+async def _run_oneshot(reader: Reader, session: AsyncSession) -> dict:
+    """Одноразовый читатель: берёт первую тему из очереди, удаляет после прогона."""
+    topics = json.loads(reader.topics)
+    if not topics:
+        reader.enabled = False
+        log.info("[Readers] %s очередь пуста → выключен", reader.name)
+        return {"status": "queue_empty"}
+
+    topic = topics[0]
+    log.info("[Readers] %s (oneshot) | тема='%s'", reader.name, topic[:60])
+
+    search_url = f"https://html.duckduckgo.com/html/?q={quote(topic)}"
+    result = {"query": topic[:60], "status": "error"}
+
+    async with httpx.AsyncClient(timeout=45) as client:
+        try:
+            resp = await client.post(
+                f"{WYRD_QUARANTINE_URL}/huginn/scout",
+                json={"url": search_url, "task": topic, "category": reader.category},
+                headers=_huginn_headers(),
+            )
+            data = resp.json() if resp.status_code == 200 else {}
+            result["status"] = data.get("status", f"http_{resp.status_code}")
+        except Exception as e:
+            result["status"] = f"error: {e}"
+
+    # Удаляем использованную тему
+    topics.pop(0)
+    reader.topics = json.dumps(topics, ensure_ascii=False)
+    if not topics:
+        reader.enabled = False
+        log.info("[Readers] %s очередь исчерпана → выключен", reader.name)
+
+    return {topic[:40]: result}
+
+
+# ── LLM: генерация свежего угла поиска ─────────────────────────────────────
+
+async def _generate_fresh_query(
+    topic: str,
+    category: str,
+    last_queries: list[str],
+    client: httpx.AsyncClient,
+) -> str:
+    """Умный читатель: LLM придумывает новый угол поиска по теме."""
+    if not KIE_API_KEY:
+        # Fallback: тема + текущий месяц
+        from datetime import datetime
+        return f"{topic} {datetime.utcnow().strftime('%B %Y')}"
+
+    history = ""
+    if last_queries:
+        recent = last_queries[-10:]
+        history = f"\nУже искали (не повторять):\n" + "\n".join(f"- {q}" for q in recent)
+
+    user_msg = f"Тема: {topic}\nКатегория: {category}{history}\n\nСформулируй один новый поисковый запрос:"
+
+    try:
+        resp = await client.post(
+            f"{KIE_API_URL}/chat/completions",
+            headers={"Authorization": f"Bearer {KIE_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": KIE_MODEL,
+                "max_tokens": 80,
+                "messages": [
+                    {"role": "system", "content": SMART_READER_SKILL},
+                    {"role": "user", "content": user_msg},
+                ],
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        query = resp.json()["choices"][0]["message"]["content"].strip()
+        # Убираем кавычки если LLM обернул
+        query = query.strip('"\'')
+        return query if query else f"{topic} {datetime.utcnow().strftime('%B %Y')}"
+    except Exception as e:
+        log.warning("[Readers] LLM query gen failed: %s — fallback", e)
+        from datetime import datetime
+        return f"{topic} {datetime.utcnow().strftime('%B %Y')}"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -164,6 +299,8 @@ def _fmt(r: Reader) -> dict:
         "topics": json.loads(r.topics),
         "category": r.category,
         "interval_hours": r.interval_hours,
+        "reader_type": r.reader_type,
+        "last_queries_count": len(json.loads(r.last_queries or "[]")),
         "last_run": r.last_run.isoformat() if r.last_run else None,
         "runs": r.runs,
         "enabled": r.enabled,

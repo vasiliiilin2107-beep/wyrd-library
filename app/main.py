@@ -29,6 +29,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE knowledge ADD COLUMN IF NOT EXISTS namespace VARCHAR(50) DEFAULT 'public'"
         ))
+        await conn.execute(text(
+            "ALTER TABLE readers ADD COLUMN IF NOT EXISTS reader_type VARCHAR(20) DEFAULT 'stable'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE readers ADD COLUMN IF NOT EXISTS last_queries TEXT DEFAULT '[]'"
+        ))
     await init_qdrant()
     await hq_register()
     await hq_event("startup", {"service": "library", "version": "0.3.0"})

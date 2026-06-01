@@ -32,7 +32,10 @@ class BotProfile(Base):
 
 
 class Reader(Base):
-    """Агент-читатель: приходит по расписанию, сдаёт темы в /request → Хугин → Карантин → Библиотека."""
+    """Агент-читатель: приходит по расписанию, сдаёт темы в /request → Хугин → Карантин → Библиотека.
+    reader_type=stable: тема постоянная, каждый прогон LLM генерирует новый угол.
+    reader_type=oneshot: очередь тем, после каждого прогона тема удаляется из списка.
+    """
     __tablename__ = "readers"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -43,6 +46,8 @@ class Reader(Base):
     last_run: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
     runs: Mapped[int] = mapped_column(Integer, default=0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    reader_type: Mapped[str] = mapped_column(String(20), default="stable")  # stable | oneshot
+    last_queries: Mapped[str] = mapped_column(Text, default="[]")  # JSON: последние 20 запросов
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now())
 
 

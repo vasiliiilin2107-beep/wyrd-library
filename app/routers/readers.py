@@ -67,6 +67,7 @@ class ReaderIn(BaseModel):
 
 class ReaderPatch(BaseModel):
     topics: list[str] | None = None
+    category: str | None = None
     interval_hours: int | None = None
     enabled: bool | None = None
     reader_type: str | None = None
@@ -106,6 +107,8 @@ async def patch_reader(rid: int, body: ReaderPatch, session: AsyncSession = Depe
         raise HTTPException(404, "Reader not found")
     if body.topics is not None:
         reader.topics = json.dumps(body.topics, ensure_ascii=False)
+    if body.category is not None:
+        reader.category = body.category
     if body.interval_hours is not None:
         reader.interval_hours = body.interval_hours
     if body.enabled is not None:

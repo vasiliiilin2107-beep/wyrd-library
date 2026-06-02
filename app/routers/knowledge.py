@@ -92,7 +92,7 @@ async def list_knowledge(
     limit: int = 20,
     session: AsyncSession = Depends(get_session),
 ):
-    stmt = select(Knowledge).order_by(desc(Knowledge.request_count)).limit(limit)
+    stmt = select(Knowledge).order_by(desc(Knowledge.id)).limit(limit)
     if category:
         stmt = stmt.where(Knowledge.category == category)
     if namespace:

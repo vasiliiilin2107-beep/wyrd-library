@@ -7,11 +7,11 @@ log = logging.getLogger(__name__)
 
 KIE_API_URL = os.environ.get("KIE_API_URL", "https://polza.ai/api/v1")
 KIE_API_KEY = os.environ.get("KIE_API_KEY", "")
-SEARCH_MODEL = "perplexity/sonar"
+SEARCH_MODEL = "deepseek/deepseek-v4-flash"
 
 
 async def search(query: str) -> dict:
-    """Поиск через Perplexity Sonar — реальный интернет через polza.ai."""
+    """Поиск через DeepSeek V4 Flash — генерация ответов через polza.ai."""
     if not KIE_API_KEY:
         log.warning("[Courier] KIE_API_KEY не задан")
         return {"answer": "", "sources": []}

@@ -35,13 +35,28 @@ async def hq_event(event_type: str, payload: dict = None) -> None:
 
 
 async def hq_register_agent(name: str, role: str, level: str, branch: str) -> int | None:
-    """Регистрирует агента в HQ. Возвращает agent_id или None."""
+    """Регистрирует агента в HQ. Если уже существует — возвращает его id."""
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
+            # Сначала ищем существующего агента по имени
+            r_list = await client.get(f"{HQ_URL}/civilization/agents")
+            if r_list.status_code == 200:
+                agents = r_list.json()
+                # API возвращает {"agents": [...]} или [...]
+                if isinstance(agents, dict):
+                    agents = agents.get("agents", [])
+                for a in agents:
+                    if a.get("name") == name:
+                        log.info(f"[HQ] агент '{name}' уже существует id={a['id']}, используем его")
+                        return a["id"]
+
+            # Создаём нового
             r = await client.post(f"{HQ_URL}/civilization/agents", json={
                 "name": name, "role": role, "level": level, "branch": branch, "can_propose": False,
             })
-            return r.json().get("id")
+            agent_id = r.json().get("id")
+            log.info(f"[HQ] агент '{name}' создан id={agent_id}")
+            return agent_id
     except Exception as e:
         log.warning(f"[HQ] register_agent failed: {e}")
         return None

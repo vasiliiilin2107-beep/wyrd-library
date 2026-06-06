@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 _raw = os.getenv("WYRD_ALLOWED_TOKENS", "") or os.getenv("WYRD_INTERNAL_TOKEN", "")
 ALLOWED_TOKENS = {t.strip() for t in _raw.split(",") if t.strip()}
 
-_OPEN_PREFIXES = ("/health", "/static")
+_OPEN_PREFIXES = ("/health", "/static", "/janitor/status", "/knowledge/stats")
 
 
 async def internal_token_middleware(request: Request, call_next):

@@ -147,7 +147,7 @@ async def reader_scheduler_loop():
     await asyncio.sleep(30)
     while True:
         try:
-            async with AsyncSession(engine) as session:
+            async with AsyncSession(engine, expire_on_commit=False) as session:
                 rows = (await session.execute(
                     select(Reader).where(Reader.enabled == True)
                 )).scalars().all()
@@ -269,7 +269,6 @@ async def _generate_fresh_query(
     """Умный читатель: LLM придумывает новый угол поиска по теме."""
     if not KIE_API_KEY:
         # Fallback: тема + текущий месяц
-        from datetime import datetime
         return f"{topic} {datetime.utcnow().strftime('%B %Y')}"
 
     history = ""
@@ -300,7 +299,6 @@ async def _generate_fresh_query(
         return query if query else f"{topic} {datetime.utcnow().strftime('%B %Y')}"
     except Exception as e:
         log.warning("[Readers] LLM query gen failed: %s — fallback", e)
-        from datetime import datetime
         return f"{topic} {datetime.utcnow().strftime('%B %Y')}"
 
 
